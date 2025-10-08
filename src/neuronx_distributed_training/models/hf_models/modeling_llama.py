@@ -692,7 +692,7 @@ class LlamaModel(LlamaModelHF):
                     position_embeddings=position_embeddings,
                 )
 
-            hidden_states = layer_outputs[0]
+            # hidden_states = layer_outputs[0]
 
             if use_cache:
                 next_decoder_cache += (layer_outputs[2 if output_attentions else 1],)

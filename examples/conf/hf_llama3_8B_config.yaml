@@ -4,7 +4,7 @@ seed: 1234
 
 trainer:
   devices: 32
-  num_nodes: 4
+  num_nodes: 1
   max_epochs: -1 # PTL default. In practice, max_steps will be reached first.
   max_steps: 10000 # consumed_samples = global_step * micro_batch_size * data_parallel_size * accumulate_grad_batches
   log_every_n_steps: 10
@@ -48,12 +48,12 @@ distributed_strategy:
   virtual_pipeline_model_parallel_size: 1
   context_parallel_size: 1
   zero1: True
-  sequence_parallel: True
+  sequence_parallel: False
   kv_replicator: 4
 
 data:
   micro_batch_size: 1 # limited by TRN memory
-  global_batch_size: 1024
+  global_batch_size: 256
   train_dir: /home/ubuntu/examples_datasets/wikicorpus_llama3_tokenized_8k
 
 model:
@@ -61,7 +61,7 @@ model:
   # gradient accumulation will be done automatically based on data_parallel_size
 
   # model architecture
-  model_config: /home/ubuntu/config.json # TODO: Expand this into arguments in this file
+  model_config: /home/ubuntu/neuronx-distributed/examples/training/llama/tp_zero1_llama_hf_pretrain/8B_config_llama3/config.json # TODO: Expand this into arguments in this file
   encoder_seq_length: 8192
   max_position_embeddings: 8192
   num_layers: 32

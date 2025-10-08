@@ -24,6 +24,7 @@ from .base_model import BaseHfModel
 class HFMixtralModule(BaseHfModel):
     def _get_model(self):
         config = MixtralConfig.from_pretrained(self.config.model.model_config)
+        config.use_cache = False
         config.return_dict = False
         config.sequence_parallel_enabled = self.config.distributed_strategy.get("sequence_parallel", False)
         config.qkv_linear = self.config.model.get("qkv_linear", False)
