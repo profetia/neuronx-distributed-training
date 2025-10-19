@@ -224,8 +224,7 @@ class BaseModelModule(NLPModel):
             grad_norm = None
             # only the last stages of the pipeline return losses
             if self.log_parameter_norm:
-                # param_norm = self.calculate_parameter_norm(self.parameters())
-                param_norm = None
+                param_norm = self.calculate_parameter_norm(self.parameters())
             if self.log_gradient_norm:
                 grad_norm = self._optimizer.grad_norm
 

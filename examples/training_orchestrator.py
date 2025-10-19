@@ -142,6 +142,19 @@ def main(cfg) -> None:
     cfg = process_config(cfg)
     from training import train
 
+    
+    # Patch neuronx toolchain    
+    from torch_xla.distributed.zero_redundancy_optimizer import ZeroRedundancyOptimizer
+
+    __register_hook_original = ZeroRedundancyOptimizer._register_hook
+    def __register_hook_patched(self, param, shard):
+        if not param.requires_grad:
+            return
+        return __register_hook_original(self, param, shard)
+
+    ZeroRedundancyOptimizer._register_hook = __register_hook_patched
+
+    
     train(cfg)
 
 
