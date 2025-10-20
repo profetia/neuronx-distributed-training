@@ -213,8 +213,11 @@ class BaseModelModule(NLPModel):
                 self.throughput.set_seqs_per_iteration(
                     self.config.data.micro_batch_size, parallel_state.get_data_parallel_size(), self.num_microbatches
                 )
+            
             step_time, throughput = self.throughput.get_throughput()
-            _, tflops = self.throughput_calculator(step_time)
+            # _, tflops = self.throughput_calculator(step_time)
+            tflops = None
+
             throughput_peak = self.throughput.throughput_peak
             if throughput > throughput_peak:
                 self.throughput.throughput_peak = throughput
@@ -247,7 +250,7 @@ class BaseModelModule(NLPModel):
                     param_norm,
                     float(throughput),
                     float(throughput_peak),
-                    float(tflops),
+                    tflops,
                     self.trainer,
                 ),
             )

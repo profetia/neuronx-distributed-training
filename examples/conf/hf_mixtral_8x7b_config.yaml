@@ -46,7 +46,7 @@ distributed_strategy:
   pipeline_model_parallel_size: 4
   virtual_pipeline_model_parallel_size: 1
   zero1: True
-  sequence_parallel: False
+  sequence_parallel: True
   expert_model_parallel_size: 1
 
 data:
@@ -89,7 +89,7 @@ model:
 
   fusions:
     softmax: True
-    flash_attention: False # Use NKI flash attention
+    flash_attention: True # Use NKI flash attention
 
   optim:
     name: adamw
