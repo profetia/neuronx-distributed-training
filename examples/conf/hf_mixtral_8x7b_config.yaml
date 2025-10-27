@@ -52,12 +52,12 @@ distributed_strategy:
 data:
   micro_batch_size: 1 # limited by TRN memory
   global_batch_size: 64
-  train_dir: /home/ubuntu/examples_datasets/wikicorpus_llama2_tokenized_4k
+  train_dir: /fsx/linshuy2/examples_datasets/wikicorpus_llama2_tokenized_4k
 
 model:
   # model architecture
   encoder_seq_length: 4096
-  model_config: /home/ubuntu/neuronx-distributed/examples/training/mixtral/mixtral_pretrain/configs/8x7b_config.json
+  model_config: /fsx/linshuy2/neuronx-distributed/examples/training/mixtral/mixtral_pretrain/configs/8x7b_config.json
   max_position_embeddings: ${.encoder_seq_length}
   num_layers: 8
   # hidden_size: 4096
@@ -116,7 +116,7 @@ precision:
   neuron_rt_stochastic_rounding_en: '0'
 
 compiler_flags: '--model-type transformer --enable-saturate-infinity'
-compiler_cache_url: /home/ubuntu/neuron_cache
+compiler_cache_url: /fsx/linshuy2/neuron_cache
 aync_exec_max_inflight_requests: 7
 bucket_size_collectives: 1024
 neuron_rt_exec_timeout: 100
