@@ -43,7 +43,6 @@ from torch_xla import runtime
 from neuronx_distributed_training.models.megatron.module import param_is_not_shared
 from neuronx_distributed_training.utils import Throughput
 from neuronx_distributed_training.utils import get_attribute_from_cfg
-from neuronx_distributed_training.utils.utils import get_platform_target
 
 from .megatron_init import initialize_model_parallel_for_nemo
 
@@ -213,11 +212,7 @@ class BaseModelModule(NLPModel):
                 self.throughput.set_seqs_per_iteration(
                     self.config.data.micro_batch_size, parallel_state.get_data_parallel_size(), self.num_microbatches
                 )
-            
-            step_time, throughput = self.throughput.get_throughput()
-            # _, tflops = self.throughput_calculator(step_time)
-            tflops = None
-
+            throughput = self.throughput.get_throughput()
             throughput_peak = self.throughput.throughput_peak
             if throughput > throughput_peak:
                 self.throughput.throughput_peak = throughput
@@ -250,7 +245,6 @@ class BaseModelModule(NLPModel):
                     param_norm,
                     float(throughput),
                     float(throughput_peak),
-                    tflops,
                     self.trainer,
                 ),
             )
@@ -639,7 +633,6 @@ class BaseModelModule(NLPModel):
         param_norm,
         throughput,
         throughput_peak,
-        tflops,
         trainer,
     ):
         loss_cpu = loss_mean.detach().cpu()
@@ -659,9 +652,6 @@ class BaseModelModule(NLPModel):
         log_fn("consumed_samples", consumed_samples, prog_bar=True, rank_zero_only=True)
         log_fn("throughput", throughput, prog_bar=True, rank_zero_only=True)
         log_fn("throughput_peak", throughput_peak, prog_bar=True, rank_zero_only=True)
-
-        if tflops is not None:
-            log_fn("tflops", tflops, prog_bar=True, rank_zero_only=True)
 
     def setup_training_data(self, cfg):
         # We do a pass, since we are setting this up as part of data_module
@@ -720,63 +710,3 @@ class BaseModelModule(NLPModel):
             raise NotImplementedError(
                 f"{module._get_name()} is not initialized. Please provide an init method as part of init_weights API"
             )
-
-    def measure_flops(self, model_config):
-        batch_size = self.config.data.global_batch_size
-
-        #flops calculator
-        hidden_size = model_config.hidden_size
-        num_attention_heads = model_config.num_attention_heads
-        head_dim = hidden_size // num_attention_heads
-        ffn_hidden_size = model_config.intermediate_size
-        num_layers = model_config.num_hidden_layers
-        vocab_size = model_config.vocab_size
-        gqa = model_config.num_attention_heads // model_config.num_key_value_heads
-        num_experts_routed_to = model_config.num_experts_per_tok
-        ffn_multiplier = 3 if model_config.hidden_act == 'swiglu' else 2
-        macs_per_flops = 2
-
-        # General TFLOPs formula (borrowed from Equation 3 in Section 5.1 of
-        # https://arxiv.org/pdf/2104.04473.pdf).
-        # correction has been made to TFLOPs formula due to incorrect behavior
-        # observed with selective recompute when GQA not used and for all with GQA
-        seq_len = self.config.model.encoder_seq_length
-
-        pre_and_post_mha_gemm_macs = batch_size * num_layers * (1 + (2 // gqa) + 1) * (hidden_size**2) * seq_len
-        mha_bgemm_macs = batch_size * num_layers * 2 * head_dim * num_attention_heads * (seq_len**2)
-        ffn_gemm_macs = batch_size * num_layers * ffn_multiplier * ffn_hidden_size * hidden_size * seq_len * num_experts_routed_to
-        logit_lmhead_gemm_macs = batch_size * vocab_size * hidden_size * seq_len
-
-        fwd_macs = pre_and_post_mha_gemm_macs + mha_bgemm_macs + ffn_gemm_macs + logit_lmhead_gemm_macs
-        bwd_macs = 2 * fwd_macs
-        fwd_bwd_macs = fwd_macs + bwd_macs
-
-        if hasattr(self.config.model, 'activations_checkpoint_granularity') and self.config.model.activations_checkpoint_granularity == 'full':
-            fwd_bwd_macs += fwd_macs
-        if hasattr(self.config.model, 'activations_checkpoint_granularity') and self.config.model.activations_checkpoint_granularity == 'selective':
-            fwd_bwd_macs += mha_bgemm_macs
-
-        self.flops_per_iteration = fwd_bwd_macs * macs_per_flops
-
-    def throughput_calculator(self, elapsed_time_per_iter):
-        batch_size = self.config.data.global_batch_size
-        samples_per_second = batch_size / elapsed_time_per_iter
-
-        if not hasattr(self, 'flops_per_iteration'):
-            return samples_per_second, None
-
-        tflops = self.flops_per_iteration / (elapsed_time_per_iter * runtime.world_size() * (10**12))
-        return samples_per_second, tflops
-
-    def get_available_flops(self, dtype: torch.dtype | str = torch.bfloat16) -> int:
-        _XLA_FLOPS = {
-            "trn1": {
-                torch.float16: 95e12,
-                torch.bfloat16: 95e12,
-                torch.float32: 23.75e12,
-                torch.int8: 190e12,
-            }
-        }
-
-        platform = get_platform_target()
-        return int(_XLA_FLOPS[platform][dtype])

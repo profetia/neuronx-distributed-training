@@ -40,6 +40,7 @@ exp_manager:
   save_xser: True
   load_xser: True
   resume_from_checkpoint: null # manually set the checkpoint file to load from
+  log_neuron_top: True
 
 distributed_strategy:
   tensor_model_parallel_size: 8

@@ -4,7 +4,7 @@ seed: 1234
 
 trainer:
   devices: 32
-  num_nodes: 1
+  num_nodes: 2
   max_epochs: -1 # PTL default. In practice, max_steps will be reached first.
   max_steps: 10000 # consumed_samples = global_step * micro_batch_size * data_parallel_size * accumulate_grad_batches
   log_every_n_steps: 10
@@ -54,14 +54,14 @@ distributed_strategy:
 data:
   micro_batch_size: 1 # limited by TRN memory
   global_batch_size: 256
-  train_dir: /home/ubuntu/examples_datasets/wikicorpus_llama3_tokenized_8k
+  train_dir: /fsx/linshuy2/examples_datasets/wikicorpus_llama3_tokenized_8k
 
 model:
   # specify micro_batch_size, global_batch_size, and model parallelism
   # gradient accumulation will be done automatically based on data_parallel_size
 
   # model architecture
-  model_config: /home/ubuntu/neuronx-distributed/examples/training/llama/tp_zero1_llama_hf_pretrain/8B_config_llama3/config.json # TODO: Expand this into arguments in this file
+  model_config: /fsx/linshuy2/neuronx-distributed/examples/training/llama/tp_zero1_llama_hf_pretrain/8B_config_llama3/config.json # TODO: Expand this into arguments in this file
   encoder_seq_length: 8192
   max_position_embeddings: 8192
   num_layers: 32
@@ -106,7 +106,7 @@ precision:
   neuron_rt_stochastic_rounding_en: '0'
 
 compiler_flags: '--model-type transformer'
-compiler_cache_url: /home/ubuntu/neuron_cache
+compiler_cache_url: /fsx/linshuy2/neuron_cache
 aync_exec_max_inflight_requests: 5
 bucket_size_collectives: 1024
 neuron_rt_exec_timeout: 100

@@ -140,9 +140,7 @@ def process_config(cfg):
 @hydra.main(config_path="conf", config_name="megatron_gpt_config", version_base="1.2")
 def main(cfg) -> None:
     cfg = process_config(cfg)
-    from training import train
 
-    
     # Patch neuronx toolchain    
     from torch_xla.distributed.zero_redundancy_optimizer import ZeroRedundancyOptimizer
 
@@ -154,6 +152,8 @@ def main(cfg) -> None:
 
     ZeroRedundancyOptimizer._register_hook = __register_hook_patched
 
+
+    from training import train
     
     train(cfg)
 

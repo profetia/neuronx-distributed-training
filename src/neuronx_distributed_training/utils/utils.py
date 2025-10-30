@@ -74,7 +74,7 @@ class Throughput:
             window_size -= 1
         throughput = window_size * self.seqs_per_iteration / self.window_time
         self.throughputs.append(throughput)
-        return step_time, throughput
+        return throughput
 
 def get_attribute_from_cfg(cfg: Any, attr_path: str, default: Any) -> Any:
     """

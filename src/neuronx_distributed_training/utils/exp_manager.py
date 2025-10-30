@@ -35,6 +35,8 @@ from nemo.utils.model_utils import uninject_model_parallel_rank
 from omegaconf import DictConfig, OmegaConf, open_dict
 from pytorch_lightning.callbacks import ModelCheckpoint
 
+from . import neuron_top
+
 
 @dataclass
 class CallbackParams(nemo_exp_manager.CallbackParams):
@@ -59,6 +61,7 @@ class ExpManagerConfig(nemo_exp_manager.ExpManagerConfig):
     async_checkpointing: Optional[bool] = False # default to not use async checkpointing
     resume_from_checkpoint: Optional[str] = None # manually set the checkpoint file to load from
     ckpt_ptl_version: Optional[str] = None # PTL version used of checkpoint
+    log_neuron_top: Optional[bool] = False # whether to log neuron top data
 
 
 class TimingCallback(nemo_exp_manager.TimingCallback):
@@ -326,6 +329,9 @@ def exp_manager(trainer: "pl.Trainer", cfg: Optional[Union[DictConfig, Dict]] = 
 
         # Add lightning file logging to global_rank zero
         add_filehandlers_to_pl_logger(log_dir / "lightning_logs.txt", log_dir / "nemo_error_log.txt")
+
+    if cfg.log_neuron_top and local_rank == 0:
+        neuron_top.launch(log_dir)
 
     return log_dir
 
