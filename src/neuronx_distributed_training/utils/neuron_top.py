@@ -227,20 +227,31 @@ def _process_monitor_data(monitor_data: dict):
 def _log_monitor_data(writer: SummaryWriter, monitor_data: dict, timestamp: float):
     current_runtimes = _process_monitor_data(monitor_data)
     system_runtime = current_runtimes[0]
+
+    total_tflops = 0.0
     for (nc, metrics) in system_runtime['report']['neuroncore_counters']['neuroncores_in_use'].items():
         writer.add_scalar('neuroncore_utilization/neuroncore_' + str(nc),
                           metrics['neuroncore_utilization'], timestamp)
 
+        total_tflops += metrics['effective_flops']
         tflops = float(Utils.format_flops(metrics['effective_flops']).strip()[:-2])
         writer.add_scalar('effective_tflops/neuroncore_' + str(nc), tflops, timestamp)
     
+    writer.add_scalar('effective_tflops_total', float(Utils.format_flops(total_tflops).strip()[:-2]), timestamp)
+    writer.add_scalar('effective_tflops_average', total_tflops / max(1, len(system_runtime['report']['neuroncore_counters']['neuroncores_in_use'])), timestamp)
+
     gb = 1 << 30
+    total_memory_used = 0.0
     for (nc, metrics) in system_runtime['report']['memory_used']['neuron_runtime_used_bytes']['usage_breakdown']['neuroncore_memory_usage'].items():
-        total_used = sum([metrics[field] for field in Const.MEM_USAGE_FIELD_NAMES[1]]) / gb
-        writer.add_scalar(f'memory_usage/neuroncore_{nc}', total_used, timestamp)
+        total_of_all_fields = sum([metrics[field] for field in Const.MEM_USAGE_FIELD_NAMES[1]]) / gb
+        total_memory_used += total_of_all_fields
+        writer.add_scalar(f'memory_usage/neuroncore_{nc}', total_of_all_fields, timestamp)
         for field in Const.MEM_USAGE_FIELD_NAMES[1]:
             writer.add_scalar(f'memory_breakdown/neuroncore_{nc}/{field}', metrics[field] / gb, timestamp)
             
+    writer.add_scalar('memory_usage_total', total_memory_used, timestamp)
+    writer.add_scalar('memory_usage_average', total_memory_used / max(1, len(system_runtime['report']['memory_used']['neuron_runtime_used_bytes']['usage_breakdown']['neuroncore_memory_usage'])), timestamp)
+
     writer.flush()
 
 

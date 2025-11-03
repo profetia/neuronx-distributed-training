@@ -43,8 +43,8 @@ exp_manager:
   log_neuron_top: True
 
 distributed_strategy:
-  tensor_model_parallel_size: 32
-  pipeline_model_parallel_size: 2
+  tensor_model_parallel_size: 16
+  pipeline_model_parallel_size: 4
   virtual_pipeline_model_parallel_size: 1
   zero1: True
   sequence_parallel: True
