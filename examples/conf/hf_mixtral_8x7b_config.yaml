@@ -4,7 +4,7 @@ seed: 1234
 
 trainer:
   devices: 32
-  num_nodes: 1
+  num_nodes: 4
   max_epochs: -1 # PTL default. In practice, max_steps will be reached first.
   max_steps: 22500 # consumed_samples = global_step * micro_batch_size * data_parallel_size * accumulate_grad_batches
   log_every_n_steps: 1
@@ -43,8 +43,8 @@ exp_manager:
   log_neuron_top: True
 
 distributed_strategy:
-  tensor_model_parallel_size: 8
-  pipeline_model_parallel_size: 4
+  tensor_model_parallel_size: 32
+  pipeline_model_parallel_size: 2
   virtual_pipeline_model_parallel_size: 1
   zero1: True
   sequence_parallel: True
@@ -52,7 +52,7 @@ distributed_strategy:
 
 data:
   micro_batch_size: 1 # limited by TRN memory
-  global_batch_size: 64
+  global_batch_size: 128
   train_dir: /fsx/linshuy2/examples_datasets/wikicorpus_llama2_tokenized_4k
 
 model:
@@ -60,7 +60,7 @@ model:
   encoder_seq_length: 4096
   model_config: /fsx/linshuy2/neuronx-distributed/examples/training/mixtral/mixtral_pretrain/configs/8x7b_config.json
   max_position_embeddings: ${.encoder_seq_length}
-  num_layers: 8
+  # num_layers: 8
   # hidden_size: 4096
   rope_theta: 1000000.0
 

@@ -330,7 +330,7 @@ def exp_manager(trainer: "pl.Trainer", cfg: Optional[Union[DictConfig, Dict]] = 
         # Add lightning file logging to global_rank zero
         add_filehandlers_to_pl_logger(log_dir / "lightning_logs.txt", log_dir / "nemo_error_log.txt")
 
-    if cfg.log_neuron_top and local_rank == 0:
+    if os.environ.get("COMPILE", "0") == "0" and cfg.log_neuron_top and local_rank == 0:
         neuron_top.launch(log_dir)
 
     return log_dir

@@ -16,7 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 def launch(log_dir: Path) -> Path:
     nodename = os.uname().nodename
-    node_log_dir = log_dir / nodename
+    node_log_dir = log_dir / "neuron_top_logs" / nodename
 
     script_path = inspect.getfile(inspect.currentframe())
     script_dir = Path(script_path).parent
@@ -247,7 +247,7 @@ def _log_monitor_data(writer: SummaryWriter, monitor_data: dict, timestamp: floa
 def _main(args: argparse.Namespace):
     log_dir = Path(args.log_dir)
     os.makedirs(log_dir, exist_ok=True)
-    writer = SummaryWriter(log_dir=log_dir / 'neuron_top_logs')
+    writer = SummaryWriter(log_dir=log_dir)
     
     running = True
     def _handle_sigint(signal, frame):
