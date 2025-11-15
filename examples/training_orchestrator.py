@@ -152,7 +152,8 @@ def remap_cores(cfg):
         return
     
     tensor_model_parallel_size_per_node = tensor_model_parallel_size
-    pipeline_model_parallel_size_per_node = min(pipeline_model_parallel_size, cfg.trainer.devices // tensor_model_parallel_size_per_node)
+    pipeline_model_parallel_size_per_node = max(
+        min(pipeline_model_parallel_size, cfg.trainer.devices // tensor_model_parallel_size_per_node // data_parallel_size), 1)
 
     cores_list = None # TP=32 PP=1 or TP=8 PP=4 or TP=8 PP=1 or TP=2 PP=4 
     match (tensor_model_parallel_size_per_node, pipeline_model_parallel_size_per_node):
@@ -160,7 +161,7 @@ def remap_cores(cfg):
             cores_list = [0,1,2,3,4,5,6,7,14,15,12,13,10,11,8,9,24,25,26,27,28,29,30,31,22,23,20,21,18,19,16,17]
         case (8, 2): # TP=8 PP=2
             cores_list = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,24,25,26,27,28,29,30,31,16,17,18,19,20,21,22,23]
-        case (4, 8) | (2, 8): # TP=4 PP=8 or TP=2 PP=8
+        case (4, 8) | (2, 8) | (1, 8): # TP=4 PP=8 or TP=2 PP=8
             cores_list = [0,1,2,3,6,7,4,5,14,15,12,13,8,9,10,11,16,17,18,19,22,23,20,21,30,31,28,29,24,25,26,27]
         case (4, 4): # TP=4 PP=4
             cores_list = [0,1,2,3,6,7,4,5,8,9,10,11,14,15,12,13,16,17,18,19,22,23,20,21,24,25,26,27,30,31,28,29]

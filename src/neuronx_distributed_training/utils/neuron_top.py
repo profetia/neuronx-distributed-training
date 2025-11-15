@@ -238,7 +238,9 @@ def _log_monitor_data(writer: SummaryWriter, monitor_data: dict, timestamp: floa
         writer.add_scalar('effective_tflops/neuroncore_' + str(nc), tflops, timestamp)
     
     writer.add_scalar('effective_tflops_total', float(Utils.format_flops(total_tflops).strip()[:-2]), timestamp)
-    writer.add_scalar('effective_tflops_average', total_tflops / max(1, len(system_runtime['report']['neuroncore_counters']['neuroncores_in_use'])), timestamp)
+    average_tflops = total_tflops / max(1, len(system_runtime['report']['neuroncore_counters']['neuroncores_in_use']))
+    average_tflops = float(Utils.format_flops(average_tflops).strip()[:-2])
+    writer.add_scalar('effective_tflops_average', average_tflops, timestamp)
 
     gb = 1 << 30
     total_memory_used = 0.0
