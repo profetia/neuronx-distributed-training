@@ -42,7 +42,7 @@ def sanity_check():
 
 def allreduce_intra_chip_use_xm(tensor: torch.Tensor):
     xm.all_reduce('sum', [tensor], groups=allreduce_group_spmd)
-    torch_xla.sync()
+    torch_xla.sync(wait=True)
 
 source_map = {
     'xm': {
