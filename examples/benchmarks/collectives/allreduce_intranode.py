@@ -53,7 +53,7 @@ source_map = {
 
 def run_benchmark(allreduce_func, size: int, dtype: torch.dtype, iters: int, warmup_iters: int):
     group_world_size = len(allreduce_group_spmd[0])
-    # https://forums.developer.nvidia.com/t/what-is-the-busbw-in-nccl-tests/256858
+    # https://forums.developer.nvidia.com/t/meaning-of-size-in-nccl-tests/289806/3?utm_source=chatgpt.com
     num_elements = size // torch.tensor([], dtype=dtype).element_size() // group_world_size
     tensor = torch.empty(num_elements, dtype=dtype, device=torch_xla.device())
     for _ in range(warmup_iters):
@@ -116,8 +116,8 @@ def main(args: argparse.Namespace):
         xm.rendezvous(f'start_benchmark_volume_{volume}')
 
         result = run_benchmark(source_map[args.source]['func'], volume, dtype, iters, warmup_iters)
-        time_avg = result.mean * 1e6
-        algbw = volume / result.mean / (1024 ** 3)
+        time_avg = result.median * 1e6
+        algbw = volume / result.median / (1024 ** 3)
         busbw = algbw * 2 * (group_world_size - 1) / group_world_size * len(allreduce_group_spmd)
 
         results.append({
@@ -134,7 +134,7 @@ def main(args: argparse.Namespace):
     if local_rank == 0:
         print(f"AllReduce Intra-Chip Benchmark using {source_map[args.source]['name']}")
         print(f"Args: minbytes={min_bytes}, maxbytes={max_bytes}, stepfactor={step_factor}, iters={iters}, warmup_iters={warmup_iters}")
-        print(f"Parallelism: world_size={world_size}, remap={neuron_remap}, allreduce_groups={allreduce_group_spmd}")
+        print(f"Parallelism: world_size={group_world_size}, remap={neuron_remap}, allreduce_groups={allreduce_group_spmd}")
         print(tabulate.tabulate(results, headers="keys", tablefmt="grid"))
 
 if __name__ == '__main__':
