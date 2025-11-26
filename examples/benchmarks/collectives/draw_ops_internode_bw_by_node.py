@@ -2,6 +2,8 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
+# Measured by `nccom-test`
+
 data = [
     {"op": "all_reduce", "nodes": 1, "throughput": 127.57},
     {"op": "all_reduce", "nodes": 2, "throughput": 98.92},

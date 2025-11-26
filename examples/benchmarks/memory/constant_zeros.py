@@ -17,8 +17,12 @@ device = torch_xla.device()
 
 # The difference between the two ways of creating the acc tensor is that
 # the second way does not create a `constant` in the compiled artifact
-acc = torch.zeros((N, M), device=device, dtype=dtype)
-# acc = torch.zeros((N, M), dtype=dtype).to(device)
+# acc = torch.zeros((N, M), device=device, dtype=dtype)
+
+# acc = torch.zeros((N, M), dtype=dtype).to(device) # This does not create a constant
+
+# base = torch.empty((N, M), dtype=dtype, device="meta")
+# acc = torch.zeros_like(base, device=device)
 torch_xla.sync()
 for _ in range(10):
     a = torch.empty((N, K), device=device, dtype=dtype)

@@ -54,7 +54,7 @@ source_map = {
 def run_benchmark(allreduce_func, size: int, dtype: torch.dtype, iters: int, warmup_iters: int):
     group_world_size = len(allreduce_group_spmd[0])
     # https://forums.developer.nvidia.com/t/meaning-of-size-in-nccl-tests/289806/3?utm_source=chatgpt.com
-    num_elements = size // torch.tensor([], dtype=dtype).element_size() // group_world_size
+    num_elements = size // torch.tensor([], dtype=dtype).element_size() # // group_world_size
     tensor = torch.empty(num_elements, dtype=dtype, device=torch_xla.device())
     for _ in range(warmup_iters):
         allreduce_func(tensor)
@@ -116,9 +116,14 @@ def main(args: argparse.Namespace):
         xm.rendezvous(f'start_benchmark_volume_{volume}')
 
         result = run_benchmark(source_map[args.source]['func'], volume, dtype, iters, warmup_iters)
-        time_avg = result.median * 1e6
-        algbw = volume / result.median / (1024 ** 3)
-        busbw = algbw * 2 * (group_world_size - 1) / group_world_size * len(allreduce_group_spmd)
+
+        median = torch.tensor(result.median, device=torch_xla.device())
+        xm.all_reduce('sum', [median], groups=[[i for i in range(world_size)]])
+        median = median.item() / world_size
+
+        time_avg = median * 1e6
+        algbw = volume / median / (1000 ** 3)
+        busbw = algbw * 2 * (group_world_size - 1) / group_world_size # * len(allreduce_group_spmd)
 
         results.append({
             'size(B)': volume,

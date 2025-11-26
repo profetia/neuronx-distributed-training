@@ -2,6 +2,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+# Measured by `nccom-test`
+
 # ------------------------------------------------------
 # 1. Put your new results into a DataFrame
 # ------------------------------------------------------

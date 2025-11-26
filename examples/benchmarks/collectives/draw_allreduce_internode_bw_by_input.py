@@ -2,6 +2,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 
+# Measured by `nccom-test`
+
 # -------------------------------------------------------------------
 # 1. Prepare your data
 # -------------------------------------------------------------------
