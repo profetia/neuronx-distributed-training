@@ -71,7 +71,7 @@ model:
     num_experts: 8 # of ExpertMLPs (explained in background)
     frequency: 1 # how frequent each layer is MoE i.e. 1 = every layer MoE 
     dropout: 0.0 # dropout for MoE Layer
-    capacity_factor: 2.0
+    capacity_factor: 2.0 # TODO: typically set to 1.25
     # dropless flag: 
     #   True: Uses the blockwise NKI kernel inspired by Megablocks
     #   False: 
