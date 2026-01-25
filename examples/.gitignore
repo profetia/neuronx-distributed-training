@@ -2,3 +2,4 @@ nemo_experiments/
 outputs/
 slurm-*.out
 old-runs/
+df_storage/
