@@ -74,8 +74,8 @@ def _parse_tpu_devices_patched(tpu_cores: Optional[Union[int, str, List[int]]]) 
     if isinstance(tpu_cores, str):
         tpu_cores = _parse_tpu_devices_str_patched(tpu_cores.strip())
 
-    if not _check_tpu_devices_valid_patched(tpu_cores):
-        raise TypeError("`tpu_cores` can only be 1, 2, 8, 32, 64, 128 or [<1-8>]")
+    # if not _check_tpu_devices_valid_patched(tpu_cores):
+        # raise TypeError("`tpu_cores` can only be 1, 2, 8, 32, 64, 128 or [<1-8>]")
 
     return tpu_cores
 
