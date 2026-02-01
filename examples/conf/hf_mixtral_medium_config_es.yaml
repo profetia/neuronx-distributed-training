@@ -58,7 +58,7 @@ data:
 model:
   # model architecture
   encoder_seq_length: 4096
-  model_config: /fsx/linshuy2/neuronx-distributed/examples/training/mixtral/mixtral_pretrain/configs/medium.json
+  model_config: /fsx/linshuy2/neuronx-distributed/examples/training/mixtral/mixtral_pretrain/configs/medium_es.json
   max_position_embeddings: ${.encoder_seq_length}
   # num_layers: 8
   # hidden_size: 4096
