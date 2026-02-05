@@ -82,7 +82,23 @@ from neuronx_distributed.parallel_layers.parallel_state import (
     get_tensor_model_parallel_size,
     get_expert_model_parallel_group,
 )
+from neuronx_distributed.parallel_layers import parallel_state
 
+import sys
+import os
+
+logger = logging.get_logger(__name__)
+
+# Try to import NKI kernel (availability check only)
+_NKI_KERNEL_IMPORTABLE = False
+rmsnorm_router_top_k_kernel = None
+try:
+    from neuronx_distributed_training.kernel import rmsnorm_router_top_k_kernel
+    _NKI_KERNEL_IMPORTABLE = True
+    print("[INFO] NKI Router Top-K kernel imported successfully from neuronx_distributed_training.kernel")
+except Exception as e:
+    print(f"[WARNING] NKI kernel import failed: {e}. PyTorch fallback will be used if kernel is enabled.")
+    _NKI_KERNEL_IMPORTABLE = False
 
 def _init_normal(std, w):
     return nn.init.normal_(w, mean=0.0, std=std)
@@ -95,9 +111,6 @@ if version.parse(torch.__version__) >= version.parse("2.1"):
 else:
     checkpoint_method = torch.utils.checkpoint.checkpoint
 
-
-logger = logging.get_logger(__name__)
-
 _CONFIG_FOR_DOC = "MixtralConfig"
 
 
@@ -105,17 +118,24 @@ _CONFIG_FOR_DOC = "MixtralConfig"
 class MixtralRMSNorm(MixtralRMSNormHF):
     """Neuron implementation of MixtralRMSNorm which upcasts hidden_states to torch.double for improved numeric accuracy."""
 
-    def __init__(self, hidden_size, eps=1e-6, sequence_parallel_enabled=False):
+    def __init__(self, hidden_size, eps=1e-6, sequence_parallel_enabled=False, use_float32_precision=False):
         """
         MixtralRMSNorm is equivalent to T5LayerNorm
+        
+        Args:
+            use_float32_precision: If True, use float32 instead of float64 for RMSNorm computation.
+                                   This matches the NKI kernel precision and can be used for 
+                                   performance comparison experiments.
         """
         super().__init__(hidden_size, eps=eps)
         setattr(self.weight, "sequence_parallel_enabled", sequence_parallel_enabled)
+        self.use_float32_precision = use_float32_precision
 
     def forward(self, hidden_states):
         input_dtype = hidden_states.dtype
-        # Upcast hidden_states to float64
-        hidden_states = hidden_states.to(torch.double)
+        # Upcast hidden_states to float64 (default) or float32 (for kernel parity experiments)
+        compute_dtype = torch.float32 if self.use_float32_precision else torch.double
+        hidden_states = hidden_states.to(compute_dtype)
         variance = hidden_states.pow(2).mean(-1, keepdim=True)
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
         return self.weight * hidden_states.to(input_dtype)
@@ -341,11 +361,16 @@ class MixtralAttention(MixtralAttentionHF):
 
 
 def initialize_mixtral_moe_layer(config):
+    # Config option for precision experiments: use_float32_router
+    # If True, Router uses float32 instead of float64 for softmax/sigmoid (matches NKI kernel precision)
+    use_float32_router = getattr(config, 'use_float32_router', False)
+    
     # Default to RouterTopK (without Sinkhorn)
     router = RouterTopK(
         num_experts=config.num_local_experts,
         top_k=config.num_experts_per_tok,
         hidden_size=config.hidden_size,
+        use_float32_precision=use_float32_router,
     )
 
     init_method = partial(_init_normal, config.initializer_range)
@@ -449,19 +474,38 @@ class MixtralDecoderLayer(MixtralDecoderLayerHF):
 
     def __init__(self, config: MixtralConfig, layer_index):
         nn.Module.__init__(self)
+        self.config = config
         self.hidden_size = config.hidden_size
         self.self_attn = MixtralAttention(config=config)
         if config.moe_frequency <= config.num_hidden_layers and layer_index % config.moe_frequency == 0:
             self.mlp = initialize_mixtral_moe_layer(config)
         else:
             self.mlp = LlamaMLP(config)
+        
+        # Config option for precision experiments: use_float32_rmsnorm
+        # If True, RMSNorm uses float32 instead of float64 (matches NKI kernel precision)
+        use_float32_rmsnorm = getattr(config, 'use_float32_rmsnorm', False)
+        
         self.input_layernorm = MixtralRMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, sequence_parallel_enabled=config.sequence_parallel_enabled
+            config.hidden_size, eps=config.rms_norm_eps, 
+            sequence_parallel_enabled=config.sequence_parallel_enabled,
+            use_float32_precision=use_float32_rmsnorm
         )
         self.post_attention_layernorm = MixtralRMSNorm(
-            config.hidden_size, eps=config.rms_norm_eps, sequence_parallel_enabled=config.sequence_parallel_enabled
+            config.hidden_size, eps=config.rms_norm_eps, 
+            sequence_parallel_enabled=config.sequence_parallel_enabled,
+            use_float32_precision=use_float32_rmsnorm
         )
-
+        
+        # Check if NKI kernel should be used (config option + kernel available)
+        self.use_nki_router_topk = getattr(config, 'use_nki_router_topk', False) and _NKI_KERNEL_IMPORTABLE
+        if self.use_nki_router_topk and layer_index == 0:
+            # Only print once for the first layer to avoid spam
+            print(f"[INFO] NKI Router Top-K kernel enabled for MoE layers (config.use_nki_router_topk={getattr(config, 'use_nki_router_topk', False)}, _NKI_KERNEL_IMPORTABLE={_NKI_KERNEL_IMPORTABLE})")
+        if use_float32_rmsnorm and layer_index == 0:
+            print(f"[INFO] RMSNorm using float32 precision (config.use_float32_rmsnorm=True)")
+    
+    # NKI Kernel Integration for Router Top-K
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -520,14 +564,193 @@ class MixtralDecoderLayer(MixtralDecoderLayerHF):
             mlp_class = type(self.mlp).__name__
 
         residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
+        # ========================================================================
+        # NKI Kernel Integration for Router Top-K
+        # ========================================================================
+        # To enable the optimized kernel, uncomment the code block below and
+        # comment out the original implementation (lines 556-557 for LlamaMLP, 
+        # and line 684 for MoE).
+        #
+        # IMPORTANT: The kernel performs Residual Add + RMSNorm internally, so
+        # we skip the separate post_attention_layernorm call when using kernel.
+        #
+        # The kernel performs:
+        #   1. Residual Add (hidden_states + residual)
+        #   2. RMSNorm
+        #   3. Router logits computation
+        #   4. Top-K expert selection
+        #   5. Expert affinities computation
+        #
+        # Backward pass is automatically handled by PyTorch autograd.
+        # ========================================================================
+        
         if mlp_class == "LlamaMLP":
+            hidden_states = self.post_attention_layernorm(hidden_states)
             hidden_states = self.mlp(hidden_states)
+            # Add residual connection for LlamaMLP path
+            hidden_states = residual + hidden_states
         elif mlp_class == "MoE":
-            hidden_states, router_logits = self.mlp(hidden_states)
+            if self.use_nki_router_topk:
+                moe_layer = self.mlp
+                expert_mlps = moe_layer.expert_mlps
+                
+                # Gather first to full size, then call kernel on full data    
+                # Step 1: Gather hidden_states from SP region first (if needed)
+                if moe_layer.sequence_parallel_enabled:
+                    # hidden_states is (T/TP, B, H), gather to (T, B, H)
+                    full_hidden_states = mappings.gather_from_sequence_parallel_region(
+                        hidden_states,
+                        sequence_dimension=moe_layer.sequence_dimension,
+                        to_model_parallel=False,
+                        process_group=moe_layer.tensor_parallel_group,
+                    )
+                else:
+                    full_hidden_states = hidden_states
+                
+                # Get shape info
+                full_hidden_states_shape = full_hidden_states.shape
+                seq_len = full_hidden_states_shape[moe_layer.sequence_dimension]
+                
+                # Get router parameters from MoE layer
+                router = moe_layer.router
+                router_weight = router.linear_router.weight  # Shape: (E, H)
+                router_bias = getattr(router.linear_router, 'bias', None)  # Shape: (E,) or None
+                top_k = router.top_k
+                rmsnorm_weight = self.post_attention_layernorm.weight  # Shape: (H,)
+                
+                # Step 2: Flatten full hidden_states for kernel
+                # Shape: (T, B, H) or (B, T, H) -> (T*B, H)
+                if moe_layer.sequence_parallel_enabled:
+                    T_full, B, H = full_hidden_states.shape
+                else:
+                    B, T_full, H = full_hidden_states.shape
+                
+                full_hidden_states_flat = full_hidden_states.view(-1, H)
+                
+                # Determine number of shards for kernel execution
+                # n_shards must satisfy: 
+                # 1. T_total % n_shards == 0 (even distribution)
+                # 2. T_PER_SHARD % TILE_T == 0 (kernel tile alignment)
+                # 
+                # TILE_T in kernel is 128 (power of 2 for safe divisibility)
+                # So T_PER_SHARD must be divisible by 128
+                KERNEL_TILE_T = 128
+                T_total = full_hidden_states_flat.shape[0]
+                
+                # Find valid n_shards
+                # n_shards = 1
+                # for candidate in [8, 4, 2, 1]:
+                #     if T_total % candidate == 0:
+                #         T_per_shard = T_total // candidate
+                #         if T_per_shard % KERNEL_TILE_T == 0:
+                #             n_shards = candidate
+                #             break
+                
+                # 8
+                MAX_SHARDS = 8
+                num_tiles = T_total // KERNEL_TILE_T
+                n_shards = 1
+                candidate = MAX_SHARDS
+                while candidate >= 1:
+                    if num_tiles % candidate == 0:
+                        n_shards = candidate
+                        break
+                    candidate //= 2
+                n_shards = candidate
+                
+                # Fallback check: ensure both constraints are met
+                T_per_shard = T_total // n_shards
+                if T_total % n_shards != 0 or T_per_shard % KERNEL_TILE_T != 0:
+                    error_msg = (
+                        f"[KERNEL FALLBACK ERROR] Cannot use NKI kernel due to shape constraints"
+                    )
+                    raise RuntimeError(error_msg)
+                else:
+                    # Step 3: Call kernel on FULL data (after gather)
+                    # Kernel outputs will be full-sized, no extra gathers needed!
+                    # Print once to confirm kernel is being used
+                    if not hasattr(self, '_kernel_info_printed'):
+                        self._kernel_info_printed = True
+                        print(f"[NKI KERNEL] Using rmsnorm_router_top_k_kernel: T={T_total}, n_shards={n_shards}, T_per_shard={T_per_shard}, TILE_T={KERNEL_TILE_T}")
+                    
+                    kernel_outputs = rmsnorm_router_top_k_kernel[(n_shards,)](
+                            hidden_states=full_hidden_states_flat,
+                            rmsnorm_weight=rmsnorm_weight,
+                            router_weight=router_weight,
+                            top_k=top_k,
+                            router_bias=router_bias,
+                            act_fn="softmax",
+                            topk_first=False,
+                            eps=self.post_attention_layernorm.variance_epsilon,
+                        )
+                    hidden_states_normed_flat, router_logits_kernel, expert_affinities_kernel, expert_index_kernel = kernel_outputs
+                    
+                    # ================================================================
+                    # - hidden_states_normed_flat: (T*B, H) - full
+                    # - expert_affinities_kernel: (T*B, E) or (T*B, top_k) - full
+                    # - expert_index_kernel: (T*B, top_k) - full
+                    # ================================================================
+                    
+                    # Convert kernel outputs to dtype of full_hidden_states (kernel outputs float32)
+                    original_dtype = full_hidden_states.dtype
+                    expert_affinities_full = expert_affinities_kernel.to(original_dtype)
+                    expert_index_full = expert_index_kernel.to(torch.long)
+                    
+                    # All-Reduce expert_affinities gradients in backward pass (if not EP enabled)
+                    ep_enabled = parallel_state.get_expert_model_parallel_size() > 1
+                    if not ep_enabled:
+                        expert_affinities_for_mlps = mappings.copy_to_tensor_model_parallel_region(expert_affinities_full)
+                    else:
+                        expert_affinities_for_mlps = expert_affinities_full
+                    
+                    # Call expert_mlps directly with kernel outputs, bypassing router
+                    # hidden_states_normed_flat is already (T*B, H) from kernel output
+                    output = expert_mlps(
+                        hidden_states=hidden_states_normed_flat.to(original_dtype),
+                        expert_affinities=expert_affinities_for_mlps,
+                        expert_index=expert_index_full,
+                        seq_len=seq_len,
+                    )
+                    
+                    # Reshape output back: (T*B, H) -> (T, B, H) or (B, T, H)
+                    output = output.view(full_hidden_states_shape)
+                    
+                    # Handle reduce operations (same as MoE._forward_compute_bound)
+                    if moe_layer.sequence_parallel_enabled:
+                        if ep_enabled:
+                            output = mappings.reduce_scatter_to_sequence_parallel_region(
+                                output, moe_layer.sequence_dimension, 
+                                process_group=parallel_state.get_world_group()
+                            )
+                        else:
+                            output = mappings.reduce_scatter_to_sequence_parallel_region(
+                                output, moe_layer.sequence_dimension,
+                                process_group=moe_layer.tensor_parallel_group,
+                            )
+                    else:
+                        if ep_enabled:
+                            output = mappings.reduce_from_tensor_model_parallel_region(
+                                output, process_group=parallel_state.get_world_group()
+                            )
+                        else:
+                            output = mappings.reduce_from_tensor_model_parallel_region(
+                                output, process_group=moe_layer.tensor_parallel_group
+                            )
+                    
+                    hidden_states = output
+                    router_logits = router_logits_kernel
+                    
+                    # Residual connection (same as original no-kernel path)
+                    hidden_states = residual + hidden_states
+            else:
+                # Original implementation (default) - kernel not available or not enabled
+                hidden_states = self.post_attention_layernorm(hidden_states)
+                hidden_states, router_logits = self.mlp(hidden_states)
+                # Add residual connection for non-kernel path
+                hidden_states = residual + hidden_states
         else:
             raise TypeError(f"MLP Layer type must be either LlamaMLP or MoE, got {type(self.mlp).__name__}.")
-        hidden_states = residual + hidden_states
+        # Note: For kernel path, residual connection is already done inside the kernel branch
 
         outputs = (hidden_states,)
 
@@ -550,7 +773,140 @@ class MixtralDecoderLayer(MixtralDecoderLayerHF):
             outputs += (router_logits,)
 
         return outputs
+
+    # def forward(
+    #     self,
+    #     hidden_states: torch.Tensor,
+    #     position_embeddings: Tuple[torch.Tensor, torch.Tensor],
+    #     past_router_logits: Optional[torch.Tensor],
+    #     attention_mask: Optional[torch.Tensor] = None,
+    #     position_ids: Optional[torch.LongTensor] = None,
+    #     past_key_value: Optional[Tuple[torch.Tensor]] = None,
+    #     output_attentions: Optional[bool] = False,
+    #     output_router_logits: Optional[bool] = False,
+    #     use_cache: Optional[bool] = False,
+    #     **kwargs,
+    # ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
+    #     if "padding_mask" in kwargs:
+    #         warnings.warn(
+    #             "Passing `padding_mask` is deprecated and will be removed in v4.37. Please make sure use `attention_mask` instead.`"
+    #         )
+    #     """
+    #     Args:
+    #         hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
+    #         position_embeddings (`Tuple[torch.Tensor, torch.Tensor]`): position embeddings
+    #         past_router_logits(`torch.FloatTensor`): logits of all previous routers
+    #         attention_mask (`torch.FloatTensor`, *optional*): attention mask of size
+    #             `(batch, sequence_length)` where padding elements are indicated by 0.
+    #         past_key_value (`Tuple(torch.FloatTensor)`, *optional*): cached past key and value projection states
+    #         output_attentions (`bool`, *optional*):
+    #             Whether or not to return the attentions tensors of all attention layers. See `attentions` under
+    #             returned tensors for more detail.
+    #         output_router_logits (`bool`, *optional*):
+    #             Whether or not to return the logits of all the routers. They are useful for computing the router loss, and
+    #             should not be returned during inference.
+    #         use_cache (`bool`, *optional*):
+    #             If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding
+    #             (see `past_key_values`).
+    #     """
+
+    #     residual = hidden_states
+
+    #     hidden_states = self.input_layernorm(hidden_states)
+
+    #     # Self Attention
+    #     hidden_states, self_attn_weights, present_key_value = self.self_attn(
+    #         hidden_states=hidden_states,
+    #         position_embeddings=position_embeddings,
+    #         attention_mask=attention_mask,
+    #         past_key_value=past_key_value,
+    #         output_attentions=output_attentions,
+    #         use_cache=use_cache,
+    #     )
+    #     hidden_states = residual + hidden_states
+
+    #     # Fully Connected
+    #     if type(self.mlp).__name__ == "NxDCheckpointWrapper":
+    #         mlp_class = type(self.mlp._checkpoint_wrapped_module).__name__
+    #     else:
+    #         mlp_class = type(self.mlp).__name__
+
+    #     residual = hidden_states
+    #     hidden_states = self.post_attention_layernorm(hidden_states)
+    #     if mlp_class == "LlamaMLP":
+    #         hidden_states = self.mlp(hidden_states)
+    #     elif mlp_class == "MoE":
+    #         hidden_states, router_logits = self.mlp(hidden_states)
+    #     else:
+    #         raise TypeError(f"MLP Layer type must be either LlamaMLP or MoE, got {type(self.mlp).__name__}.")
+    #     hidden_states = residual + hidden_states
+
+    #     outputs = (hidden_states,)
+
+    #     if output_attentions:
+    #         outputs += (self_attn_weights,)
+
+    #     if use_cache:
+    #         outputs += (present_key_value,)
+
+    #     if output_router_logits:
+    #         # Concatenate the router logits with previous router logits
+    #         if past_router_logits is not None:
+    #             if mlp_class == "LlamaMLP":
+    #                 router_logits = past_router_logits
+    #             elif mlp_class == "MoE":
+    #                 router_logits = torch.cat((past_router_logits, router_logits), dim=0)
+    #             else:
+    #                 raise TypeError(f"MLP Layer type must be either LlamaMLP or MoE, got {type(self.mlp).__name__}.")
+
+    #         outputs += (router_logits,)
+
+    #     return outputs
+
+# class MixtralRotaryEmbedding(MixtralRotaryEmbeddingHF):
+#     """
+#     Wrapper for HF Mixtral Rotary Embedding.
+#     The forward function is overriden to use `double()` instead of `float()` for numerical precision,
+#     because NxD is using downcast. See https://github.com/huggingface/transformers/pull/29285.
+#     """
     
+#     @torch.no_grad()
+#     def forward(self, x, position_ids):
+#         # Get sequence length from position_ids or x
+#         if position_ids is not None:
+#             # position_ids shape: [batch_size, seq_len] or [seq_len]
+#             seq_len = position_ids.max().item() + 1
+#         else:
+#             # Fallback to x shape if position_ids is None
+#             # x shape: [bsz, seq_len, hidden] or [bsz, num_heads, seq_len, head_dim]
+#             if x.dim() > 2:
+#                 seq_len = x.shape[-2]
+#             else:
+#                 seq_len = x.shape[-1]
+        
+#         # Ensure cache is large enough
+#         if seq_len > self.max_seq_len_cached:
+#             self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
+        
+#         # Core RoPE block with double precision for numerical stability
+#         # This is important when using downcast (BF16) in NxD
+#         # We compute cos/sin for all positions up to seq_len, similar to base class
+#         device_type = x.device.type
+#         device_type = device_type if isinstance(device_type, str) and device_type != "mps" else "cpu"
+        
+#         # Compute frequencies with double precision
+#         t = torch.arange(seq_len, device=x.device, dtype=torch.int64).type_as(self.inv_freq)
+#         inv_freq_double = self.inv_freq.double()
+#         freqs = torch.outer(t.double(), inv_freq_double)
+#         # Different from paper, but it uses a different permutation in order to obtain the same calculation
+#         emb = torch.cat((freqs, freqs), dim=-1)
+        
+#         with torch.autocast(device_type=device_type, enabled=False):
+#             cos = emb.cos()
+#             sin = emb.sin()
+        
+#         # Return with shape [seq_len, head_dim] to match base class behavior
+#         return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
 
 class MixtralRotaryEmbedding(MixtralRotaryEmbeddingHF):
     """

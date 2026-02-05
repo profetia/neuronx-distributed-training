@@ -31,6 +31,13 @@ class HFMixtralModule(BaseHfModel):
         config.kv_shared_group_size = self.config.distributed_strategy.get("kv_replicator", 1)
         config.max_position_embeddings = max(config.max_position_embeddings, self.config.model.get("max_position_embeddings"))
         config.use_flash_attention = self.config.model.fusions.flash_attention
+        
+        config.use_nki_router_topk = self.config.model.fusions.get("nki_router_topk", False)
+        
+        # Precision experiment configs: use float32 instead of float64 to match NKI kernel precision
+        config.use_float32_rmsnorm = self.config.model.get("use_float32_rmsnorm", False)
+        config.use_float32_router = self.config.model.get("use_float32_router", False)
+        
         if self.config.model.get('num_layers', -1) != -1:
             config.num_hidden_layers = self.config.model.get('num_layers')
         if self.config.model.get('hidden_size', -1) != -1:
