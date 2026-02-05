@@ -430,10 +430,11 @@ class LlamaMLP(LlamaMLPHF):
             # We checkpoint the MLP compute too, since we see extra data movement which is more
             # expensive than the recompute in this case.
 
-            if self.config.selective_checkpoint_enabled:
-                intermediate_states = checkpoint_method(activation_mlp, gate_proj, up_proj)
-            else:
-                intermediate_states = self.act_fn(gate_proj) * up_proj
+            # if self.config.selective_checkpoint_enabled:
+            #     intermediate_states = checkpoint_method(activation_mlp, gate_proj, up_proj)
+            # else:
+            #     intermediate_states = self.act_fn(gate_proj) * up_proj
+            intermediate_states = self.act_fn(gate_proj) * up_proj
             down_proj = self.down_proj(intermediate_states)
 
         return down_proj
@@ -450,7 +451,7 @@ class MixtralDecoderLayer(MixtralDecoderLayerHF):
         nn.Module.__init__(self)
         self.hidden_size = config.hidden_size
         self.self_attn = MixtralAttention(config=config)
-        if layer_index % config.moe_frequency == 0:
+        if config.moe_frequency <= config.num_hidden_layers and layer_index % config.moe_frequency == 0:
             self.mlp = initialize_mixtral_moe_layer(config)
         else:
             self.mlp = LlamaMLP(config)

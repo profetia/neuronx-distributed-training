@@ -65,7 +65,7 @@ class HFMixtralModule(BaseHfModel):
         self.nxd_config["pipeline_config"].update(
             {
                 "transformer_layer_cls": MixtralDecoderLayer,
-                "output_loss_value_spec": (True, False, False, False),
+                "output_loss_value_spec": (True, False, False, False) if config.output_router_logits else (True, False),
                 "input_names": ["input_ids", "attention_mask", "labels"],
                 "leaf_module_cls": leaf_module_cls,
             }

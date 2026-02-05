@@ -58,7 +58,7 @@ data:
 model:
   # model architecture
   encoder_seq_length: 4096
-  model_config: /fsx/linshuy2/neuronx-distributed/examples/training/mixtral/mixtral_pretrain/configs/large.json
+  model_config: /fsx/linshuy2/neuronx-distributed/examples/training/mixtral/mixtral_pretrain/configs/large_dense.json
   max_position_embeddings: ${.encoder_seq_length}
   # num_layers: 8
   # hidden_size: 4096
@@ -69,7 +69,7 @@ model:
   # MoE Configs
   moe:
     num_experts: 8 # of ExpertMLPs (explained in background)
-    frequency: 1 # how frequent each layer is MoE i.e. 1 = every layer MoE 
+    frequency: 1024 # how frequent each layer is MoE i.e. 1 = every layer MoE 
     dropout: 0.0 # dropout for MoE Layer
     capacity_factor: 2.0
     # dropless flag: 
@@ -80,7 +80,7 @@ model:
     dropless: False
     routing_algorithm: top_k # or top_k - sinkhorn must have top_k=1 only topk is currently implemented
     top_k: 2 # number of top k routing
-    output_router_logits: True
+    output_router_logits: False
     router_aux_loss_coef: 0.02
     normalize_top_k_affinities: True
 
