@@ -501,9 +501,11 @@ class MixtralDecoderLayer(MixtralDecoderLayerHF):
         self.use_nki_router_topk = getattr(config, 'use_nki_router_topk', False) and _NKI_KERNEL_IMPORTABLE
         if self.use_nki_router_topk and layer_index == 0:
             # Only print once for the first layer to avoid spam
-            print(f"[INFO] NKI Router Top-K kernel enabled for MoE layers (config.use_nki_router_topk={getattr(config, 'use_nki_router_topk', False)}, _NKI_KERNEL_IMPORTABLE={_NKI_KERNEL_IMPORTABLE})")
+            # print(f"[INFO] NKI Router Top-K kernel enabled for MoE layers (config.use_nki_router_topk={getattr(config, 'use_nki_router_topk', False)}, _NKI_KERNEL_IMPORTABLE={_NKI_KERNEL_IMPORTABLE})")
+            pass
         if use_float32_rmsnorm and layer_index == 0:
-            print(f"[INFO] RMSNorm using float32 precision (config.use_float32_rmsnorm=True)")
+            pass
+            # print(f"[INFO] RMSNorm using float32 precision (config.use_float32_rmsnorm=True)")
     
     # NKI Kernel Integration for Router Top-K
     def forward(
@@ -671,7 +673,7 @@ class MixtralDecoderLayer(MixtralDecoderLayerHF):
                     # Print once to confirm kernel is being used
                     if not hasattr(self, '_kernel_info_printed'):
                         self._kernel_info_printed = True
-                        print(f"[NKI KERNEL] Using rmsnorm_router_top_k_kernel: T={T_total}, n_shards={n_shards}, T_per_shard={T_per_shard}, TILE_T={KERNEL_TILE_T}")
+                        # print(f"[NKI KERNEL] Using rmsnorm_router_top_k_kernel: T={T_total}, n_shards={n_shards}, T_per_shard={T_per_shard}, TILE_T={KERNEL_TILE_T}")
                     
                     kernel_outputs = rmsnorm_router_top_k_kernel[(n_shards,)](
                             hidden_states=full_hidden_states_flat,
