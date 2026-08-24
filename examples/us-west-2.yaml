@@ -1,0 +1,60 @@
+Region: us-west-2
+Image:
+  Os: ubuntu2204
+HeadNode:
+  InstanceType: c5.4xlarge
+  Networking:
+    SubnetId: subnet-0eeedd8a44b4c85d1
+  Ssh:
+    KeyName: linshuy2@illinois.edu
+  LocalStorage:
+    RootVolume:
+      Size: 1024
+      Encrypted: false
+  CustomActions:
+    OnNodeConfigured:
+      Script: s3://neuron-s3/pcluster/post-install-scripts/neuron-installation/v2.26.0/u22/pt/install_neuron.sh
+  Iam:
+    S3Access:
+       - BucketName: neuron-s3
+         EnableWriteAccess: false
+Scheduling:
+  Scheduler: slurm
+  SlurmQueues:
+    - Name: compute1
+      CapacityType: ONDEMAND
+      ComputeSettings:
+        LocalStorage:
+          RootVolume:
+            Size: 1024
+            Encrypted: false
+      ComputeResources:
+        - Efa:
+            Enabled: true
+          InstanceType: trn1n.32xlarge
+          MaxCount: 8
+          MinCount: 0
+          Name: queue1-i1
+      Networking:
+        SubnetIds:
+          - subnet-0c82eae1c92e85615
+        PlacementGroup:
+          Enabled: true
+      CustomActions:
+        OnNodeConfigured:
+          Script: s3://neuron-s3/pcluster/post-install-scripts/neuron-installation/v2.26.0/u22/pt/install_neuron.sh
+      Iam:
+        S3Access:
+          - BucketName: neuron-s3
+            EnableWriteAccess: false
+SharedStorage:
+- FsxLustreSettings:
+    # DeploymentType: PERSISTENT_1
+    # StorageCapacity: 1200
+    # PerUnitStorageThroughput: 200
+    # KmsKeyId: arn:aws:kms:us-west-2:905418127951:key/b7568652-7146-46d0-b760-512e7f729132
+    BackupId: backup-09f5362645cd64d2d
+    DeletionPolicy: Retain
+  MountDir: /fsx
+  Name: pclusterfsx
+  StorageType: FsxLustre
